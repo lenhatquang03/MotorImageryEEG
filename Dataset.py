@@ -112,6 +112,7 @@ class Dataset:
         self.__data = self.__data.T / 1e6
         self.__data = mne.io.RawArray(self.data, data_info)
         self.__data.set_annotations(events)
+        # The channel X5 is purely used for synchronization between each event and its marker. Removing this channel **after the events are added to the data** is safe and sensible.
         self.__data.drop_channels(["X5"])
         self.__data.load_data()
 
