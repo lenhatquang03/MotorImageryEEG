@@ -1,13 +1,14 @@
+from typing import Union
 from scipy.io import loadmat
 import numpy as np
 import mne
 
 class Dataset:
     """
-    A class to extract and preprocess data from EEG .mat files
+    A class to extract relevant data from EEG .mat files
     
     Attributes:
-    ____________
+    ----------
     __file_path : str
         Path to the .mat file
     __ID : numpy.str_
@@ -20,13 +21,26 @@ class Dataset:
         The total number of samples recorded
     __marker : numpy.ndarray
         Events (classes) corresponding to each sample
-    __data : numpy.ndarray
+    __data : numpy.ndarray | mne.io.RawArray
         EEG data samples for each channels
     __channels : list
         List of names of channels used
     __binsuV : numpy.uint8
         Binned microvolt value 
-        """
+    
+    Methods:
+    ----------
+    extract_file(self) -> None
+        Extract key data fields from the Matlab structure "o"
+    
+    format_data(self) -> None
+        Modify the data based on the many formats described in the MNE-Python package, where self.__data is transformed into an mne.io.RawArray object
+
+    add_montage(self) -> None
+        Montage: the specific arrangement and display of EEG channels on the EEG records
+        Explicitly set the montage for our data (only if it isn't already in the .mat data file)
+    """
+
     def __init__(self, file_path : str):
         self.__file_path = file_path
         self.__ID = None
@@ -37,43 +51,42 @@ class Dataset:
         self.__data = None
         self.__channels = None
         self.__binsuV = None
-        self.__montage = None
-    
+
     @property
-    def ID(self):
+    def ID(self) -> np.str_:
         return self.__ID
     
     @property
-    def tag(self):
+    def tag(self) -> np.str_:
         return self.__tag 
     
     @property
-    def sampling_freq(self):
+    def sampling_freq(self) -> np.uint8:
         return self.__sampling_freq
     
     @property
-    def num_of_samples(self):
+    def num_of_samples(self) -> np.int32:
         return self.__num_of_samples
     
     @property
-    def marker(self):
+    def marker(self) -> np.ndarray:
         return self.__marker
     
     @property
-    def data(self):
+    def data(self) -> Union[np.ndarray, mne.io.RawArray]:
         return self.__data
     
+    @data.setter
+    def data(self, new_data : np.ndarray) -> None:
+        self.__data = new_data
+        
     @property
-    def channels(self):
+    def channels(self) -> list:
         return self.__channels
     
     @property
-    def binsuV(self):
+    def binsuV(self) -> np.uint8:
         return self.__binsuV
-    
-    @property
-    def montage(self):
-        return self.__montage
     
 
     def extract_file(self):
@@ -109,14 +122,15 @@ class Dataset:
             sfreq = self.sampling_freq, 
             ch_types = channel_type
         )
-        self.__data = self.__data.T / 1e6
-        self.__data = mne.io.RawArray(self.data, data_info)
-        self.__data.set_annotations(events)
-        # The channel X5 is purely used for synchronization between each event and its marker. Removing this channel **after the events are added to the data** is safe and sensible.
-        self.__data.drop_channels(["X5"])
-        self.__data.load_data()
+        self.data = self.data.T / 1e6
+        # Transform self.__data into an mne.io.RawArray object
+        self.data = mne.io.RawArray(self.data, data_info)
+        self.data.set_annotations(events)
+        # The channel X5 is purely used for synchronization between each event and its marker. Removing this channel after the events are added to the data is safe and sensible.
+        self.data.drop_channels(["X5"])
+        self.data.load_data()
 
-    def add_montage(self):
+    def add_montage(self) -> None:
         standard_1020 = mne.channels.make_standard_montage("standard_1020")
         channel_ids = [i for (i, channel) in enumerate(standard_1020.ch_names) if channel in self.data.ch_names]
         montage = standard_1020.copy()
