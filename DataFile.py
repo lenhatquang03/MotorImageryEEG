@@ -6,7 +6,7 @@ import regex as re
 import numpy as np
 import mne
 
-class Datafile:
+class DataFile:
     """
     A class to extract relevant data from EEG .mat files of the NoMT interaction paradigm
     
@@ -40,12 +40,26 @@ class Datafile:
     extract_file(self) -> None
         Extract key data fields from the Matlab structure "o"
     
-    format_data(self) -> None
-        Modify the data based on the many formats described in the MNE-Python package, where self.__data is transformed into an mne.io.RawArray object
+    intersession_breaks(self, break_duration = 2) -> List[tuple]
+        Detect breaks between recording sessions. There are at most 2 breaks per recording session.
 
-    add_montage(self) -> None
-        Montage: the specific arrangement and display of EEG channels on the EEG records
-        Explicitly set the montage for our data (only if it isn't already in the .mat data file)
+    trial_information(self) -> list
+        Find the starting signal of all imagery trials, first and last MEANINGFUL trials. 
+    
+    create_events(self) -> mne.Annotations:
+        Create events bassed on the appearance of eGUI stimulus action-signals for meaningful trials
+    
+    convert_mne(self, drop_channels = ["X5"]) -> None:
+        Convert data to MNE's specified format.
+
+    set_metadata(self) -> None:
+        Set additional information for our dataset
+
+    add_montage(self) -> None:
+        Add information about the used EEG montage in our dataset
+    
+    generate(self) -> None:
+        Extract, convert, and add information from raw data file.
     """
     __IMAGERY_ENCODE = {
             1 : "blank",
@@ -53,7 +67,7 @@ class Datafile:
             3: "right hand",
             4 : "passive or neutral",
             5 : "left leg",
-            6 : "toungue",
+            6 : "tongue",
             7 : "right leg",
             91 : "intersession breaks",
             92 : "experiment end",
@@ -173,10 +187,6 @@ class Datafile:
         - Each trial consisted of 1s of motor imagery and 1.5s - 2.5s random off-time which was also marked as 0, even for "intersession breaks", "experiment end", and "initial relaxation".
         - We want to remove the EEG data recorded in first 2.5 minutes of acclimatisation, the intersession breaks, and immediately after the experiment ends.
 
-        Parameters:
-        ----------
-        None
-
         Returns:
         ----------
         list
@@ -204,13 +214,9 @@ class Datafile:
                 break
         return trials, start_trial_idx, end_trial_idx
         
-    def create_events(self):
+    def create_events(self) -> mne.Annotations:
         """
         Create events bassed on the appearance of eGUI stimulus action-signals for meaningful trials
-
-        Parameters:
-        ----------
-        None
 
         Returns:
         mne.Annotations
@@ -225,7 +231,7 @@ class Datafile:
                                  sampling_freq= self.sampling_freq) for k in range(start_trial_idx, end_trial_idx + 1)
                         if trials[k][1] not in {91, 92, 99}]
         event_duration = [1] * len(event_onset)
-        event_description = [Datafile.get_IMAGERY_ENCODE()[trials[k][1] + 1] for k in range(start_trial_idx, end_trial_idx + 1)
+        event_description = [DataFile.get_IMAGERY_ENCODE()[trials[k][1] + 1] for k in range(start_trial_idx, end_trial_idx + 1)
                         if trials[k][1] not in {91, 92, 99}]
         
         # "Good" events
@@ -263,10 +269,6 @@ class Datafile:
         ----------
         drop_channels : list
             a list of channels to drop (default is X5 which is only used for synchronization)
-
-        Returns:
-        ----------
-        None
         """
         # Create data info
         channel_types = ["eeg"] * len(self.channels)
@@ -296,14 +298,6 @@ class Datafile:
     def set_metadata(self) -> None:
         """
         Set additional information (experiment subject and date of the recording session) for our dataset
-
-        Parameters:
-        ----------
-        None
-
-        Returns:
-        ----------
-        None
         """
         # Extract metadata from the file name
         pattern = r"(Subject\w?)(\d{6})"
@@ -330,14 +324,6 @@ class Datafile:
     def add_montage(self) -> None:
         """
         Add information about the used EEG montage in our dataset. A montage is a specific arrangement of EEG channels.
-        
-        Parameters:
-        ----------
-        None
-         
-        Returns:
-        ----------
-        None
          """
         standard_1020 = mne.channels.make_standard_montage("standard_1020")
         channel_ids = [i for (i, channel) in enumerate(standard_1020.ch_names) if channel in self.format_data.ch_names]
@@ -346,3 +332,13 @@ class Datafile:
         channel_info = [standard_1020.dig[j + 3] for j in channel_ids]
         montage.dig = standard_1020.dig[0:3] + channel_info
         self.format_data.set_montage(montage)
+    
+    def generate(self) -> None:
+        """
+        Extract, convert, and add information from raw data file
+        """
+        self.extract_file()
+        self.create_events()
+        self.convert_mne()
+        self.set_metadata()
+        self.add_montage()
