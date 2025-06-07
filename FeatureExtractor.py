@@ -3,6 +3,7 @@ from DataFile import DataFile
 from scipy.signal.windows import hann
 import numpy as np
 import mne
+import gc
 
 def extract_FFT_amplitudes(format_data : mne.io.RawArray, tmin = 0, tmax = 0.85, baseline = None) -> np.ndarray:
     """
@@ -44,7 +45,57 @@ def extract_FFT_amplitudes(format_data : mne.io.RawArray, tmin = 0, tmax = 0.85,
     feature_vector = amplitudes.reshape(amplitudes.shape[0], amplitudes.shape[1] * amplitudes.shape[2])
     return feature_vector
 
-class FeatureExtractor:
+def extract_WT_power(epochs : mne.EpochsArray, directory : str, save_prefix = Literal["train", "validation", "final_train", "test"], freqs = np.arange(4, 40, 2), batch_size = 1000):
+    """
+    Extract time-frequecy features using the Wavelet Transforms from raw EEG epochs and save them in file .npy
+    Due to RAM limitation, feature extraction from the whole raw EEG signals can't be done. Here, I resolve to divide the raw data into batches, extract the WT features for each of those batches, save them and later on create a custom Dataset that can generate those features on the fly while training.
+
+    Parameters:
+    ----------
+    epochs : mne.EpochsArray
+        The object containing the raw EEG epochs
+    directory : str
+        The directory to save .npy files of WT features
+    save_prefix : Literal["train", "validation", "final_train", "test"]
+        The purpose of the extracted features, whether they will serve as the training, validation, final_train(training + validation), or test data
+    freqs : np.ndarray
+        The array of frequencies of Morlet's daughter wavelets we use, default is np.arange(4, 40, 2) for biometric relevance
+    batch_size : int
+        The number of raw EEG epochs for each batch
+    """
+    n_epochs = len(epochs)
+    i = 1
+
+    # Batch extraction
+    for start in range(0, n_epochs, batch_size):
+        stop = min(start + batch_size, n_epochs)
+        print(f"Processing epochs {start} to {stop}")
+        batch_epoch = epochs[start:stop]
+        power = mne.time_frequency.tfr_morlet(
+            batch_epoch,
+            freqs=freqs,
+            n_cycles=freqs/2,
+            return_itc=False,
+            use_fft=True,
+            decim = 3,
+            average=False, # Keep shape: (n_epochs, n_channels, n_freqs, n_times)
+            verbose = False
+        )
+
+        # Save batches to .npy files - directory = "data\\wavelet_features\\fold_{i}"
+        if save_prefix in ["final_train", "test"]:
+            save_path = f"{directory}\\batch_{i}.npy"
+        else:
+            save_path = f"{directory}\\{save_prefix}\\batch_{i}.npy"
+        i += 1
+        np.save(save_path, power.data.astype(np.float32).transpose(0, 2, 3, 1))
+
+        # Release memory
+        del batch_epoch, power
+        gc.collect()
+
+
+class FTAExtractor:
     """
     A class to extract EEG features from raw signal
 
@@ -55,8 +106,8 @@ class FeatureExtractor:
     
     Methods:
     ----------
-    extract(self, feature : Literal["FTA", "Wavelet", "time series"], merge = True)
-        Extract signal features from the data files
+    extract(self, merge = True)
+        Extract Fourier transform amplitudes features from the data files
     """
     def __init__(self, data_files : List[DataFile]):
         self.__data_files = data_files
@@ -65,7 +116,7 @@ class FeatureExtractor:
     def data_files(self) -> List[DataFile]:
         return self.__data_files
 
-    def extract(self, feature : Literal["FTA", "Wavelet", "time series"]):
-        if (feature == "FTA"):
-            features = [extract_FFT_amplitudes(data_file.format_data) for data_file in self.data_files]
-            return features
+
+    def extract(self):
+        features = [extract_FFT_amplitudes(data_file.format_data) for data_file in self.data_files]
+        return features
